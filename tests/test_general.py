@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from hurrqueue import InMemoryConnector, Queue
+from snailqueue import InMemoryConnector, Queue
 
 
 @dataclass

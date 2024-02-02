@@ -33,7 +33,7 @@ repos:
 
   - id: mypy
     name: mypy
-    entry: shell/mypy.sh hurrqueue
+    entry: shell/mypy.sh snailqueue
     language: system
     pass_filenames: false
     types_or: [python]

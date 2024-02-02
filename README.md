@@ -18,5 +18,5 @@ PYTHONPATH=. pytest-watcher --now .
 
 ```bash
 ./shell/mypy.sh
-./shell.pytest.sh
+./shell/pytest.sh
 ```

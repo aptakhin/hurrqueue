@@ -1,29 +1,30 @@
 from __future__ import annotations
 
-import uuid
 from dataclasses import dataclass
-from typing import Generator, Optional
+from typing import TYPE_CHECKING, Generator, Optional
 
 import pytest
 from sqlalchemy import Column, DateTime, MetaData, Table, func, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from hurrqueue import Queue, SqlAlchemyConnector
+from snailqueue import Queue, SqlAlchemyConnector
+
+if TYPE_CHECKING:
+    import uuid
 
 meta = MetaData()
 
 
 @dataclass
 class Message(object):
-    message_id: Optional[uuid.UUID] = None
+    message_id: Optional["uuid.UUID"] = None
 
-    @staticmethod
-    def db_serialize() -> dict[str, str]:
+    def db_serialize(self: "Message") -> dict[str, str]:  # noqa: PLR6301
         return {}
 
     @staticmethod
-    def db_deserializer(row: dict[str, str]) -> "Message":
+    def db_deserialize(row: dict[str, str]) -> "Message":
         return Message(message_id=row["id"])
 
 
@@ -67,16 +68,18 @@ task_table = Table(
 
 
 @pytest.mark.asyncio()
+@pytest.mark.require_db()
 async def test_basic(engine: AsyncEngine) -> None:
     connector = SqlAlchemyConnector(
         engine=engine,
         table=task_table,
+        id_column=task_table.c.id,
         priority_column=task_table.c.time_created,
         locked_by_name_column=task_table.c.locked_by_name,
         locked_by_time_column=task_table.c.locked_by_time,
-        deserializer=Message.db_deserializer,
+        serializer=Message.db_serialize,
+        deserializer=Message.db_deserialize,
     )
-
     q = MessageQueue(connector=connector, name="xxx")
     msg = Message()
     write_message_id = await q.put(msg)

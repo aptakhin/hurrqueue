@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "hurrqueue"
+name = "snailqueue"
 version = "0.1.0"
 description = ""
 authors = ["Alexander Ptakhin <me@aptakhin.name>"]
