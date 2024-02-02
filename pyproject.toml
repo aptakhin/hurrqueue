@@ -9,6 +9,7 @@ readme = "README.md"
 [tool.poetry.dependencies]
 python = "^3.9"
 sqlalchemy = "^2.0.25"
+asyncpg = "^0.29.0"
 
 
 [tool.poetry.group.dev.dependencies]
@@ -144,14 +145,18 @@ skip-magic-trailing-comma = false
 line-ending = "auto"
 
 [tool.ruff.lint.per-file-ignores]
-# "__init__.py" = ["E402"]
 "**/test_*.py" = ["S101"]  # S101 Use of `assert` detected
 
 [tool.mypy]
 ignore_missing_imports = true
-# modules = "Processing.services.template_match"
 # warn_unused_configs = true
 # check_untyped_defs = true
 # explicit_package_bases = true
 # warn_unreachable = true
 # warn_redundant_casts = true
+
+[tool.pytest.ini_options]
+markers = [
+    "require_db: marks tests as require database",
+]
+asyncio_mode = "auto"

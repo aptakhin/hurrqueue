@@ -17,7 +17,7 @@ class MessageQueue(Queue[Message]):
 
 @pytest.mark.asyncio()
 async def test_basic() -> None:
-    q = MessageQueue(connector=InMemoryConnector(storage={}), name='inmemory')
+    q = MessageQueue(connector=InMemoryConnector(storage={}), name="inmemory")
     msg = Message(message_id=uuid.uuid4())
     await q.put(msg)
 
@@ -25,3 +25,10 @@ async def test_basic() -> None:
     assert read_msg
 
     assert read_msg.message_id == msg.message_id
+
+
+def test_usage_type() -> None:
+    _ = Queue[Message](
+        connector=InMemoryConnector(storage={}),
+        name="inmemory",
+    )
