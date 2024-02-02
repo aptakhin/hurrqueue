@@ -7,10 +7,7 @@ license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
-python = "^3.9"
-sqlalchemy = "^2.0.25"
-asyncpg = "^0.29.0"
-
+python = ">=3.9,<3.13"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.2.0"
@@ -19,6 +16,13 @@ pytest-asyncio = "^0.23.4"
 mypy = "^1.8.0"
 pre-commit = "^3.6.0"
 pytest-watcher = "^0.3.5"
+
+[tool.poetry.group.sqlalchemy.dependencies]
+sqlalchemy = "^2.0.25"
+asyncpg = "^0.29.0"
+
+[tool.poetry.group.python-statemachine.dependencies]
+python-statemachine = "^2.1.2"
 
 [build-system]
 requires = ["poetry-core"]

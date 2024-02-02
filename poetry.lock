@@ -414,6 +414,17 @@ tomli = {version = ">=2.0.1,<3.0.0", markers = "python_version < \"3.11\""}
 watchdog = ">=2.0.0"
 
 [[package]]
+name = "python-statemachine"
+version = "2.1.2"
+description = "Python Finite State Machines made easy."
+optional = false
+python-versions = ">=3.7,<3.13"
+files = [
+    {file = "python_statemachine-2.1.2-py3-none-any.whl", hash = "sha256:d7e369d5da5b9007cc7cf5eb7a1b169081e2f4b7d30b6415fc122858fb7696ec"},
+    {file = "python_statemachine-2.1.2.tar.gz", hash = "sha256:0b0dd8b28738b53f14391b06d5072cd5e72259da5ae23574d3d4f5e6dd366663"},
+]
+
+[[package]]
 name = "pyyaml"
 version = "6.0.1"
 description = "YAML parser and emitter for Python"
@@ -685,5 +696,5 @@ watchmedo = ["PyYAML (>=3.10)"]
 
 [metadata]
 lock-version = "2.0"
-python-versions = "^3.9"
-content-hash = "9f1a5c539a3d48c7517918da33704846cabba7560c1a68f6a9e8438e37dcb255"
+python-versions = ">=3.9,<3.13"
+content-hash = "6cd1f4463bb0ed4dd4e714bda0988d14c77d2e13e52d0d939dc523fc3d996909"
