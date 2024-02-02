@@ -8,8 +8,150 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = "^3.9"
+sqlalchemy = "^2.0.25"
 
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.2.0"
+pytest = ">=7.0,<8.0"
+pytest-asyncio = "^0.23.4"
+mypy = "^1.8.0"
+pre-commit = "^3.6.0"
+pytest-watcher = "^0.3.5"
 
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+
+[tool.ruff]
+# Exclude a variety of commonly ignored directories.
+exclude = [
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".ipynb_checkpoints",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pyenv",
+    ".pytest_cache",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    ".vscode",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "build",
+    "dist",
+    "node_modules",
+    "site-packages",
+    "venv",
+]
+
+line-length = 79
+indent-width = 4
+
+preview = true
+
+target-version = "py39"
+
+[tool.ruff.lint]
+# ruff linter --output-format json | jq ".[].prefix" | sort
+select = [
+    "A",
+    "AIR",
+    "ANN",
+    "ARG",
+    "ASYNC",
+    "B",
+    "BLE",
+    "C4",
+    "C90",
+    "COM",
+    # "CPY",
+    # "D",
+    "DJ",
+    "DTZ",
+    "EM",
+    "ERA",
+    "EXE",
+    "F",
+    "FA",
+    "FBT",
+    "FIX",
+    "FLY",
+    "FURB",
+    "G",
+    "I",
+    "ICN",
+    # "INP",
+    "INT",
+    "ISC",
+    "LOG",
+    "N",
+    "NPY",
+    "PD",
+    "PERF",
+    "PGH",
+    "PIE",
+    "PL",
+    "PT",
+    # "PTH",
+    "PYI",
+    # "Q",
+    "RET",
+    "RSE",
+    "RUF",
+    "S",
+    "SIM",
+    "SLF",
+    "SLOT",
+    "T10",
+    "T20",
+    "TCH",
+    "TD",
+    "TID",
+    "TRIO",
+    "TRY",
+    # "UP",
+    "YTT",
+]
+ignore = []
+
+# Allow fix for all enabled rules (when `--fix`) is provided.
+fixable = ["ALL"]
+unfixable = []
+
+# Allow unused variables when underscore-prefixed.
+dummy-variable-rgx = "^(_+|(_+[a-zA-Z0-9_]*[a-zA-Z0-9]+?))$"
+
+[tool.ruff.format]
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+[tool.ruff.lint.per-file-ignores]
+# "__init__.py" = ["E402"]
+"**/test_*.py" = ["S101"]  # S101 Use of `assert` detected
+
+[tool.mypy]
+ignore_missing_imports = true
+# modules = "Processing.services.template_match"
+# warn_unused_configs = true
+# check_untyped_defs = true
+# explicit_package_bases = true
+# warn_unreachable = true
+# warn_redundant_casts = true
