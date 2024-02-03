@@ -1,45 +1,61 @@
 from __future__ import annotations
 
-from collections import deque
 from typing import Generic, Optional, Protocol, TypeVar
 
-MessageType = TypeVar("MessageType")
-
-# globals =
+IdType = TypeVar("IdType")
+TaskType = TypeVar("TaskType")
+StateType = TypeVar("StateType")
 
 
 class Connector(Protocol):
-    async def put(self, queue_name: str, message: MessageType) -> None: ...
+    async def put(self, task: TaskType) -> IdType: ...
 
-    async def pull(self, queue_name: str) -> Optional[MessageType]: ...
+    async def pull(
+        self,
+        state: Optional[StateType] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> Optional[TaskType]: ...
 
+    async def get_task(self, task_id: IdType) -> TaskType: ...
 
-class InMemoryConnector(Connector):
-    def __init__(self, storage: dict[str, deque]) -> None:
-        self.storage = storage
-
-    async def put(self, queue_name: str, message: MessageType) -> None:
-        self.storage.setdefault(queue_name, deque())
-        self.storage[queue_name].append(message)
-
-    async def pull(self, queue_name: str) -> Optional[MessageType]:
-        fetch = self.storage.get(queue_name)
-        if not fetch:
-            return None
-        return fetch.popleft()
+    async def update_task(
+        self,
+        task_id: IdType,
+        state: Optional[str] = None,
+    ) -> TaskType: ...
 
 
-class Queue(Generic[MessageType]):
+class Queue(Generic[IdType, TaskType]):
     def __init__(
         self,
         connector: Connector,
-        name: str,
     ) -> None:
         self.connector = connector
-        self.name = name
 
-    async def put(self, message: MessageType) -> None:
-        return await self.connector.put(queue_name=self.name, message=message)
+    async def put(self, task: TaskType) -> IdType:
+        return await self.connector.put(task=task)
 
-    async def pull(self) -> Optional[MessageType]:
-        return await self.connector.pull(self.name)
+    async def pull(
+        self,
+        state: Optional[StateType] = None,
+        timeout_seconds: Optional[float] = None,
+    ) -> Optional[TaskType]:
+        return await self.connector.pull(
+            state=state,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def get_task(self, task_id: IdType) -> TaskType:
+        return await self.connector.get_task(task_id)
+
+    async def update_task(
+        self,
+        task_id: IdType,
+        state: Optional[str] = None,
+    ) -> TaskType:
+        return await self.connector.update_task(task_id, state=state)
+
+
+class TaskNotFoundError(ValueError, Generic[IdType]):
+    def __init__(self, task_id: IdType) -> None:
+        pass

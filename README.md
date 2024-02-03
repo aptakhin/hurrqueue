@@ -1,14 +1,14 @@
-snailqueue - is a database (PostgreSQL) queue in Python.
+snailqueue - is a database (PostgreSQL) asyncio task queue in Python.
 
 Context of appropriate using of this library:
 
 * Not a heavy loads, less than 10 RPS.
 * Limited amounts of queues, as implementation relies on tables.
-* Not a big messages context.
+* Not a big tasks context.
 
 
-* Messages are stateful.
-* Flexible to any message storages: dict, pydantic BaseModel, dataclass, attrs and any generic.
+* Tasks are stateful.
+* Flexible to any tasks storages: dict, pydantic BaseModel, dataclass, attrs and any generic.
 
 ```bash
 pip install snailqueue
@@ -28,12 +28,16 @@ poetry install
 pre-commit install
 
 docker compose -f environments/docker-compose-postgres.yaml up -d
+# or
+make run-infra
 ```
 
 ### Running tests for development
 
 ```bash
 PYTHONPATH=. pytest-watcher --now .
+# or
+make ptw
 ```
 
 ### Running checkers
@@ -51,3 +55,6 @@ Configurable pip installation.
 More abstraction on status logic. Statemachine? Timeouts of messages handling.
 Retries logic.
 Schedulers.
+All async execution. API generator. Docs.
+Jsonschema check pydantic is subset. Transports. SQS, Azure Storage Queue. Various messages – one channel.
+Base versioning.
