@@ -39,12 +39,28 @@ SerializerCallable = Callable[[TaskType], dict[str, Any]]
 DeserializerCallable = Callable[[dict[str, Any]], IdType]
 
 
+def _execute_chain(chain: list) -> Any:
+    cur = None
+    for it in chain:
+        if cur is None:
+            cur = it
+        else:
+            cur = it(cur)
+    return cur
+
+
 class SqlAlchemyConnector(Connector):
     def __init__(  # noqa: PLR0913
         self,
         *,
         engine: "AsyncEngine",
         table: "Table",
+        id_logic: "TaskIdLogic",
+        # priority_logic=TaskPriorityLogic(task_table.c.time_created),
+        # lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
+        # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
+        # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
+        # states=TaskStates(task_table.c.state, init=["enqueued"])
         id_column: "Column",
         priority_column: "Column",
         locked_by_time_column: "Column",
@@ -60,8 +76,15 @@ class SqlAlchemyConnector(Connector):
     ) -> None:
         self._engine = engine
         self._table = table
+        self._id_logic = id_logic
+        # self._priority_logic=TaskPriorityLogic(task_table.c.time_created),
+        # self._lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
+        # self._attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
+        # self._codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
+        # self._states=TaskStates(task_table.c.state, init=["enqueued"])
+
         self._locked_by = locked_by
-        self._id_column = id_column
+        # self._id_column = id_column
         self._priority_column = priority_column
         self._locked_by_time_column = locked_by_time_column
         self._locked_by_name_column = locked_by_name_column
@@ -80,12 +103,12 @@ class SqlAlchemyConnector(Connector):
                 .values(
                     self._serializer(task),
                 )
-                .returning(self._id_column)
+                .returning(self._id_logic.place())
             )
 
             res = await conn.execute(query)
             raw = res.one()
-            return raw._asdict()[self._id_column.name]
+            return raw._asdict()[self._id_logic.place().name]
 
     async def pull(
         self,
@@ -95,7 +118,7 @@ class SqlAlchemyConnector(Connector):
     ) -> Optional[TaskType]:
         async with self._begin() as conn:
             select_q = (
-                select(self._id_column.label("fetch_id"))
+                select(self._id_logic.place().label("fetch_id"))
                 .where(
                     or_(
                         self._locked_by_time_column.is_(None),
@@ -114,9 +137,7 @@ class SqlAlchemyConnector(Connector):
                 .subquery()
             )
 
-            values: dict[str, Union[str, TextClause]] = copy.deepcopy(
-                patch_values
-            )
+            values: dict[str, Union[str, TextClause]] = {}
 
             values[self._attempts_column.name] = text(
                 f"{self._attempts_column.name} + 1",
@@ -134,18 +155,19 @@ class SqlAlchemyConnector(Connector):
                 time_lock_text += f" + interval '{timeout_seconds} seconds'"
                 values[self._locked_by_time_column.name] = text(time_lock_text)
 
-            query: "Update" = (
-                update(self._table)
-                .where(
-                    self._id_column == select_q.c.fetch_id,
-                )
-                .values(
+            values.update(patch_values)
+
+            update_chain = [
+                update(self._table),
+                lambda u: self._id_logic.inject_where(u, select_q.c.fetch_id),
+                lambda u: u.values(
                     **values,
-                )
-                .returning(
+                ),
+                lambda u: u.returning(
                     literal_column("*"),
-                )
-            )
+                ),
+            ]
+            query = _execute_chain(update_chain)
 
             res = await conn.execute(query)
             raw = res.one_or_none()
@@ -156,7 +178,7 @@ class SqlAlchemyConnector(Connector):
     async def get_task(self, task_id: IdType) -> TaskType:
         async with self._begin() as conn:
             select_q = select(self._table).where(
-                self._id_column == task_id,
+                self._id_logic.place() == task_id,
             )
 
             res = await conn.execute(select_q)
@@ -171,18 +193,17 @@ class SqlAlchemyConnector(Connector):
         values: dict[str, str],
     ) -> TaskType:
         async with self._begin() as conn:
-            query: "Update" = (
-                update(self._table)
-                .where(
-                    self._id_column == task_id,
-                )
-                .values(
+            chain = [
+                update(self._table),
+                lambda u: self._id_logic.inject_where(u, task_id),
+                lambda u: u.values(
                     **values,
-                )
-                .returning(
+                ),
+                lambda u: u.returning(
                     literal_column("*"),
-                )
-            )
+                ),
+            ]
+            query = _execute_chain(chain)
 
             res = await conn.execute(query)
             raw = res.one_or_none()
@@ -201,3 +222,24 @@ class SqlAlchemyConnector(Connector):
         """Begin transaction."""
         async with self._engine.begin() as conn:
             yield conn
+
+
+class TaskIdLogic:
+    def __init__(self, id_columns: Union["Column", list["Column"]]) -> None:
+        if isinstance(id_columns, list) and len(id_columns) > 1:
+            raise ValueError(
+                "More than one column in id is not supported yet!"
+            )
+
+        if isinstance(id_columns, list):
+            self.id_column = id_columns[0]
+        else:
+            self.id_column = id_columns
+
+    def place(self) -> Any:
+        return self.id_column
+
+    def inject_where(self, cte, value) -> Any:
+        return cte.where(
+            self.id_column == value,
+        )
