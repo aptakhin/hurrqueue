@@ -157,22 +157,22 @@ async def test_state(engine: AsyncEngine) -> None:
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     task_id = await q.put(task)
 
-    read_msg = await q.pull(state="processing")
+    read_msg = await q.pull({"state": "processing"})
     assert read_msg
 
     assert read_msg.parse_id == str(task.parse_id)
 
     # Nothing to pull
-    assert await q.pull(state="processing") is None
+    assert await q.pull({"state": "processing"}) is None
 
     task = await q.get_task(task_id)
     assert task.state == "processing"
 
-    task = await q.update_task(task_id, state="completed")
+    task = await q.patch_task(task_id, {"state": "completed"})
     assert task.state == "completed"
 
     # Nothing to pull
-    assert await q.pull(state="processing") is None
+    assert await q.pull({"state": "processing"}) is None
 
 
 @pytest.mark.fast()
@@ -198,15 +198,15 @@ async def test_retries(engine: AsyncEngine) -> None:
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     await q.put(task)
 
-    read_msg = await q.pull(state="processing")
+    read_msg = await q.pull({"state": "processing"})
     assert read_msg
 
     assert read_msg.parse_id == str(task.parse_id)
 
-    read_msg_2 = await q.pull(state="processing")
+    read_msg_2 = await q.pull({"state": "processing"})
     assert read_msg_2
 
-    read_msg_3 = await q.pull(state="processing")
+    read_msg_3 = await q.pull({"state": "processing"})
     assert read_msg_3
 
 
@@ -233,20 +233,31 @@ async def test_retries_sleep(engine: AsyncEngine) -> None:
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     await q.put(task)
 
-    read_msg = await q.pull(state="processing")
+    read_msg = await q.pull({"state": "processing"})
     assert read_msg
 
     assert read_msg.parse_id == str(task.parse_id)
 
     await asyncio.sleep(0.5)
 
-    read_msg_2 = await q.pull(state="processing")
+    read_msg_2 = await q.pull({"state": "processing"})
     assert read_msg_2
 
     await asyncio.sleep(0.5)
 
-    read_msg_3 = await q.pull(state="processing")
+    read_msg_3 = await q.pull({"state": "processing"})
     assert read_msg_3
+
+
+async def long_poll(q: TaskQueue) -> int:
+    processed_tasks = 0
+    while True:
+        task = await q.pull({"state": "processing"})
+        if not task:
+            break
+        await q.patch_task(task.id, {"state": "completed"})
+        processed_tasks += 1
+    return processed_tasks
 
 
 @pytest.mark.asyncio()
@@ -269,26 +280,26 @@ async def test_benchmark(engine: AsyncEngine) -> None:
         timeout_seconds=10.0,
     )
     q = TaskQueue(connector=connector)
-    for _ in range(1000):
+    for _ in range(500):
         task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
         await q.put(task)
 
     for _ in range(100):
         task = await q.pull(state="processing")
-        await q.update_task(task.id, state="completed")
+        await q.patch_task(task.id, {"state": "completed"})
 
-    start = time.perf_counter()
-
+    iterations = 1
     processed_tasks = 0
-    while True:
-        task = await q.pull(state="processing")
-        if not task:
-            break
-        await q.update_task(task.id, state="completed")
-        processed_tasks += 1
+    total_time = 0.0
+    for _ in range(iterations):
+        start_time = time.perf_counter()
+        processed_tasks += await long_poll(q=q)
+        end_time = time.perf_counter()
+        total_time += end_time - start_time
+    avg_time_per_iteration = total_time / iterations
+    print(f"Avg time per iteration: {avg_time_per_iteration:.6f} seconds")
 
-    end = time.perf_counter()
-    tps = float(processed_tasks) / (end - start)
+    tps = float(processed_tasks) / (total_time)
 
-    # print(f"Time {end - start:.1f}, {processed_tasks=}, {tps=}")
-    # assert False
+    print(f"Time {total_time:.1f}, {processed_tasks=}, {tps=}")
+    assert False

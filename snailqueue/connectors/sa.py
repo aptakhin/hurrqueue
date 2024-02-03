@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import copy
 from typing import (
     TYPE_CHECKING,
     Any,
@@ -34,7 +35,7 @@ from snailqueue.base import (
     TaskType,
 )
 
-SerializerCallable = Callable[[IdType], dict[str, Any]]
+SerializerCallable = Callable[[TaskType], dict[str, Any]]
 DeserializerCallable = Callable[[dict[str, Any]], IdType]
 
 
@@ -88,7 +89,7 @@ class SqlAlchemyConnector(Connector):
 
     async def pull(
         self,
-        state: Optional[StateType] = None,
+        patch_values: dict[str, str],
         locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]:
@@ -113,13 +114,13 @@ class SqlAlchemyConnector(Connector):
                 .subquery()
             )
 
-            values: dict[str, Union[str, TextClause]] = {
-                self._attempts_column.name: text(
-                    f"{self._attempts_column.name} + 1",
-                ),
-            }
-            if state is not None:
-                values["state"] = str(state)
+            values: dict[str, Union[str, TextClause]] = copy.deepcopy(
+                patch_values
+            )
+
+            values[self._attempts_column.name] = text(
+                f"{self._attempts_column.name} + 1",
+            )
 
             if not locked_by:
                 locked_by = self._locked_by
@@ -164,16 +165,12 @@ class SqlAlchemyConnector(Connector):
                 raise TaskNotFoundError(task_id)
             return self._deserializer(raw._asdict())
 
-    async def update_task(
+    async def patch_task(
         self,
         task_id: IdType,
-        state: Optional[StateType] = None,
+        values: dict[str, str],
     ) -> TaskType:
         async with self._begin() as conn:
-            values = {}
-            if state is not None:
-                values[self._state_column.name] = state
-
             query: "Update" = (
                 update(self._table)
                 .where(

@@ -12,14 +12,14 @@ class Connector(Protocol):
 
     async def pull(
         self,
-        state: Optional[StateType] = None,
+        patch_values: dict[str, str],
         locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]: ...
 
     async def get_task(self, task_id: IdType) -> TaskType: ...
 
-    async def update_task(
+    async def patch_task(
         self,
         task_id: IdType,
         state: Optional[str] = None,
@@ -38,12 +38,12 @@ class Queue(Generic[IdType, TaskType]):
 
     async def pull(
         self,
-        state: Optional[StateType] = None,
+        patch_values: dict[str, str],
         locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]:
         return await self.connector.pull(
-            state=state,
+            patch_values=patch_values,
             locked_by=locked_by,
             timeout_seconds=timeout_seconds,
         )
@@ -51,12 +51,12 @@ class Queue(Generic[IdType, TaskType]):
     async def get_task(self, task_id: IdType) -> TaskType:
         return await self.connector.get_task(task_id)
 
-    async def update_task(
+    async def patch_task(
         self,
         task_id: IdType,
-        state: Optional[str] = None,
+        values: dict[str, str],
     ) -> TaskType:
-        return await self.connector.update_task(task_id, state=state)
+        return await self.connector.patch_task(task_id, values=values)
 
 
 class TaskNotFoundError(ValueError, Generic[IdType]):
