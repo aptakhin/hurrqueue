@@ -161,6 +161,8 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 markers = [
+    "fast: tests for TDD and pre-commit development",
     "require_db: marks tests as require database",
+    "benchmark: marks benchmark tests"
 ]
 asyncio_mode = "auto"

@@ -13,6 +13,7 @@ class Connector(Protocol):
     async def pull(
         self,
         state: Optional[StateType] = None,
+        locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]: ...
 
@@ -38,10 +39,12 @@ class Queue(Generic[IdType, TaskType]):
     async def pull(
         self,
         state: Optional[StateType] = None,
+        locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]:
         return await self.connector.pull(
             state=state,
+            locked_by=locked_by,
             timeout_seconds=timeout_seconds,
         )
 

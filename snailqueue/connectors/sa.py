@@ -1,9 +1,25 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Callable, Optional
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncGenerator,
+    Callable,
+    Optional,
+    Union,
+)
 
-from sqlalchemy import and_, func, literal_column, or_, select, text, update
+from sqlalchemy import (
+    TextClause,
+    and_,
+    func,
+    literal_column,
+    or_,
+    select,
+    text,
+    update,
+)
 from sqlalchemy.dialects.postgresql import insert
 
 if TYPE_CHECKING:
@@ -37,10 +53,13 @@ class SqlAlchemyConnector(Connector):
         init_states: list[StateType],
         state_column: "Column",
         attempts_column: "Column",
+        locked_by: Optional[str] = None,
+        max_attempts: Optional[int] = 1,
         timeout_seconds: Optional[float] = None,
     ) -> None:
         self._engine = engine
         self._table = table
+        self._locked_by = locked_by
         self._id_column = id_column
         self._priority_column = priority_column
         self._locked_by_time_column = locked_by_time_column
@@ -50,6 +69,7 @@ class SqlAlchemyConnector(Connector):
         self._timeout_seconds = timeout_seconds
         self._state_column = state_column
         self._attempts_column = attempts_column
+        self._max_attempts = max_attempts
         self._init_states = init_states
 
     async def put(self, task: TaskType) -> IdType:
@@ -64,11 +84,12 @@ class SqlAlchemyConnector(Connector):
 
             res = await conn.execute(query)
             raw = res.one()
-            return raw._asdict()["id"]
+            return raw._asdict()[self._id_column.name]
 
     async def pull(
         self,
         state: Optional[StateType] = None,
+        locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]:
         async with self._begin() as conn:
@@ -85,27 +106,31 @@ class SqlAlchemyConnector(Connector):
                             func.now() >= self._locked_by_time_column,
                         ),
                     ),
+                    self._attempts_column < self._max_attempts,
                 )
                 .order_by(self._priority_column)
                 .limit(1)
                 .subquery()
             )
 
-            time_lock_text = "now()"
-            if timeout_seconds is None:
-                timeout_seconds = self._timeout_seconds
-            if timeout_seconds is not None:
-                time_lock_text += f" + interval '{timeout_seconds} seconds'"
-
-            values = {
-                self._locked_by_name_column.name: "xxx",
+            values: dict[str, Union[str, TextClause]] = {
                 self._attempts_column.name: text(
                     f"{self._attempts_column.name} + 1",
                 ),
             }
             if state is not None:
-                values["state"] = state
-            if timeout_seconds:
+                values["state"] = str(state)
+
+            if not locked_by:
+                locked_by = self._locked_by
+            if locked_by:
+                values[self._locked_by_name_column.name] = locked_by
+
+            if timeout_seconds is None:
+                timeout_seconds = self._timeout_seconds
+            if timeout_seconds is not None:
+                time_lock_text = "now()"
+                time_lock_text += f" + interval '{timeout_seconds} seconds'"
                 values[self._locked_by_time_column.name] = text(time_lock_text)
 
             query: "Update" = (
@@ -142,12 +167,12 @@ class SqlAlchemyConnector(Connector):
     async def update_task(
         self,
         task_id: IdType,
-        state: Optional[str] = None,
+        state: Optional[StateType] = None,
     ) -> TaskType:
         async with self._begin() as conn:
             values = {}
             if state is not None:
-                values["state"] = state
+                values[self._state_column.name] = state
 
             query: "Update" = (
                 update(self._table)

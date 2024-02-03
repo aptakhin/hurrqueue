@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Generator, Optional
@@ -50,7 +51,7 @@ def database_url() -> str:
 async def engine(database_url: str) -> Generator[AsyncEngine, None, None]:
     engine = create_async_engine(
         database_url,
-        echo=True,
+        echo=False,
     )
     async with engine.begin() as conn:
         await conn.run_sync(meta.drop_all)
@@ -77,30 +78,6 @@ message_table = Table(
 )
 
 
-@pytest.mark.skip()
-@pytest.mark.asyncio()
-@pytest.mark.require_db()
-async def test_basic(engine: AsyncEngine) -> None:
-    connector = SqlAlchemyConnector(
-        engine=engine,
-        table=message_table,
-        id_column=message_table.c.id,
-        priority_column=message_table.c.time_created,
-        locked_by_name_column=message_table.c.locked_by_name,
-        locked_by_time_column=message_table.c.locked_by_time,
-        serializer=Message.db_serialize,
-        deserializer=Message.db_deserialize,
-    )
-    q = MessageQueue(connector=connector)
-    msg = Message()
-    write_message_id = await q.put(msg)
-
-    read_msg = await q.pull()
-    assert read_msg
-
-    assert read_msg.message_id == write_message_id
-
-
 # https://github.com/fgmacedo/python-statemachine
 class TaskStateMachine(StateMachine):
     enqueued = State(initial=True)
@@ -119,6 +96,7 @@ class TaskStateMachine(StateMachine):
 class Task:
     state: TaskStateMachine
     parse_id: "uuid.UUID"
+    id: Optional[str] = None
 
     def db_serialize(self: "Task") -> dict[str, str]:
         return {
@@ -129,6 +107,7 @@ class Task:
     @staticmethod
     def db_deserialize(row: dict[str, str]) -> "Task":
         return Task(
+            id=row["id"],
             state=row["state"],
             parse_id=row["parse_id"],
         )
@@ -156,6 +135,7 @@ task_table = Table(
 )
 
 
+@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_state(engine: AsyncEngine) -> None:
@@ -195,6 +175,7 @@ async def test_state(engine: AsyncEngine) -> None:
     assert await q.pull(state="processing") is None
 
 
+@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_retries(engine: AsyncEngine) -> None:
@@ -211,6 +192,7 @@ async def test_retries(engine: AsyncEngine) -> None:
         state_column=task_table.c.state,
         attempts_column=task_table.c.attempts,
         timeout_seconds=None,
+        max_attempts=5,
     )
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
@@ -228,6 +210,7 @@ async def test_retries(engine: AsyncEngine) -> None:
     assert read_msg_3
 
 
+@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_retries_sleep(engine: AsyncEngine) -> None:
@@ -244,6 +227,7 @@ async def test_retries_sleep(engine: AsyncEngine) -> None:
         state_column=task_table.c.state,
         attempts_column=task_table.c.attempts,
         timeout_seconds=0.1,
+        max_attempts=5,
     )
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
@@ -263,3 +247,48 @@ async def test_retries_sleep(engine: AsyncEngine) -> None:
 
     read_msg_3 = await q.pull(state="processing")
     assert read_msg_3
+
+
+@pytest.mark.asyncio()
+@pytest.mark.benchmark()
+@pytest.mark.require_db()
+async def test_benchmark(engine: AsyncEngine) -> None:
+    connector = SqlAlchemyConnector(
+        engine=engine,
+        table=task_table,
+        id_column=task_table.c.id,
+        priority_column=task_table.c.time_created,
+        locked_by_name_column=task_table.c.locked_by_name,
+        locked_by_time_column=task_table.c.locked_by_time,
+        serializer=Task.db_serialize,
+        deserializer=Task.db_deserialize,
+        init_states=["enqueued"],
+        state_column=task_table.c.state,
+        attempts_column=task_table.c.attempts,
+        max_attempts=3,
+        timeout_seconds=10.0,
+    )
+    q = TaskQueue(connector=connector)
+    for _ in range(1000):
+        task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
+        await q.put(task)
+
+    for _ in range(100):
+        task = await q.pull(state="processing")
+        await q.update_task(task.id, state="completed")
+
+    start = time.perf_counter()
+
+    processed_tasks = 0
+    while True:
+        task = await q.pull(state="processing")
+        if not task:
+            break
+        await q.update_task(task.id, state="completed")
+        processed_tasks += 1
+
+    end = time.perf_counter()
+    tps = float(processed_tasks) / (end - start)
+
+    # print(f"Time {end - start:.1f}, {processed_tasks=}, {tps=}")
+    # assert False
