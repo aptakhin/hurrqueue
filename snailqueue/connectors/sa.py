@@ -26,6 +26,7 @@ from sqlalchemy.dialects.postgresql import insert
 if TYPE_CHECKING:
     from sqlalchemy import Column, Table, Update
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
+    from sqlalchemy.sql.dml import DMLWhereBase
 
 from snailqueue.base import (
     Connector,
@@ -61,7 +62,6 @@ class SqlAlchemyConnector(Connector):
         # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
         # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
         # states=TaskStates(task_table.c.state, init=["enqueued"])
-        id_column: "Column",
         priority_column: "Column",
         locked_by_time_column: "Column",
         locked_by_name_column: "Column",
@@ -84,7 +84,6 @@ class SqlAlchemyConnector(Connector):
         # self._states=TaskStates(task_table.c.state, init=["enqueued"])
 
         self._locked_by = locked_by
-        # self._id_column = id_column
         self._priority_column = priority_column
         self._locked_by_time_column = locked_by_time_column
         self._locked_by_name_column = locked_by_name_column
@@ -228,7 +227,7 @@ class TaskIdLogic:
     def __init__(self, id_columns: Union["Column", list["Column"]]) -> None:
         if isinstance(id_columns, list) and len(id_columns) > 1:
             raise ValueError(
-                "More than one column in id is not supported yet!"
+                "More than one column in id is not supported yet!",
             )
 
         if isinstance(id_columns, list):
@@ -236,10 +235,10 @@ class TaskIdLogic:
         else:
             self.id_column = id_columns
 
-    def place(self) -> Any:
+    def place(self) -> "Column":
         return self.id_column
 
-    def inject_where(self, cte, value) -> Any:
+    def inject_where(self, cte: "DMLWhereBase", value: Any) -> "DMLWhereBase":
         return cte.where(
             self.id_column == value,
         )

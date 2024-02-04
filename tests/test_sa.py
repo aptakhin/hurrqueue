@@ -4,7 +4,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Generator, Optional
+from typing import Callable, Generator, Optional
 
 import pytest
 from sqlalchemy import (
@@ -21,7 +21,8 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from statemachine import State, StateMachine
 
-from snailqueue import Queue, SqlAlchemyConnector, TaskIdLogic
+from snailqueue import Queue
+from snailqueue.connectors.sa import SqlAlchemyConnector, TaskIdLogic
 
 meta = MetaData()
 
@@ -61,6 +62,37 @@ async def engine(database_url: str) -> Generator[AsyncEngine, None, None]:
     yield engine
 
     await engine.dispose()
+
+
+SaFactoryType = Callable[[...], SqlAlchemyConnector]
+
+
+@pytest.fixture()
+async def sa_factory(engine: AsyncEngine) -> SaFactoryType:
+    def factory(**overrides) -> SqlAlchemyConnector:
+        kwargs = dict(
+            engine=engine,
+            table=task_table,
+            id_logic=TaskIdLogic(task_table.c.id),
+            # priority_logic=TaskPriorityLogic(task_table.c.time_created),
+            #         # lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
+            #         # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
+            #         # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
+            #         # states=TaskStates(task_table.c.state, init=["enqueued"]),
+            priority_column=task_table.c.time_created,
+            locked_by_name_column=task_table.c.locked_by_name,
+            locked_by_time_column=task_table.c.locked_by_time,
+            serializer=Task.db_serialize,
+            deserializer=Task.db_deserialize,
+            init_states=["enqueued"],
+            state_column=task_table.c.state,
+            attempts_column=task_table.c.attempts,
+            timeout_seconds=60,
+        )
+        kwargs.update(overrides)
+        return SqlAlchemyConnector(**kwargs)
+
+    return factory
 
 
 message_table = Table(
@@ -138,27 +170,8 @@ task_table = Table(
 @pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
-async def test_state(engine: AsyncEngine) -> None:
-    connector = SqlAlchemyConnector(
-        engine=engine,
-        table=task_table,
-        id_logic=TaskIdLogic(task_table.c.id),
-        # priority_logic=TaskPriorityLogic(task_table.c.time_created),
-        #         # lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
-        #         # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
-        #         # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
-        #         # states=TaskStates(task_table.c.state, init=["enqueued"]),
-        id_column=task_table.c.id,
-        priority_column=task_table.c.time_created,
-        locked_by_name_column=task_table.c.locked_by_name,
-        locked_by_time_column=task_table.c.locked_by_time,
-        serializer=Task.db_serialize,
-        deserializer=Task.db_deserialize,
-        init_states=["enqueued"],
-        state_column=task_table.c.state,
-        attempts_column=task_table.c.attempts,
-        timeout_seconds=60,
-    )
+async def test_state(engine: AsyncEngine, sa_factory: SaFactoryType) -> None:
+    connector = sa_factory()
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     task_id = await q.put(task)
@@ -184,23 +197,8 @@ async def test_state(engine: AsyncEngine) -> None:
 @pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
-async def test_retries(engine: AsyncEngine) -> None:
-    connector = SqlAlchemyConnector(
-        engine=engine,
-        table=task_table,
-        id_logic=TaskIdLogic(task_table.c.id),
-        id_column=task_table.c.id,
-        priority_column=task_table.c.time_created,
-        locked_by_name_column=task_table.c.locked_by_name,
-        locked_by_time_column=task_table.c.locked_by_time,
-        serializer=Task.db_serialize,
-        deserializer=Task.db_deserialize,
-        init_states=["enqueued"],
-        state_column=task_table.c.state,
-        attempts_column=task_table.c.attempts,
-        timeout_seconds=None,
-        max_attempts=5,
-    )
+async def test_retries(engine: AsyncEngine, sa_factory) -> None:
+    connector = sa_factory(timeout_seconds=None, max_attempts=5)
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     await q.put(task)
@@ -220,20 +218,10 @@ async def test_retries(engine: AsyncEngine) -> None:
 @pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
-async def test_retries_sleep(engine: AsyncEngine) -> None:
-    connector = SqlAlchemyConnector(
-        engine=engine,
-        table=task_table,
-        id_logic=TaskIdLogic(task_table.c.id),
-        id_column=task_table.c.id,
-        priority_column=task_table.c.time_created,
-        locked_by_name_column=task_table.c.locked_by_name,
-        locked_by_time_column=task_table.c.locked_by_time,
-        serializer=Task.db_serialize,
-        deserializer=Task.db_deserialize,
-        init_states=["enqueued"],
-        state_column=task_table.c.state,
-        attempts_column=task_table.c.attempts,
+async def test_retries_sleep(
+    engine: AsyncEngine, sa_factory: SaFactoryType
+) -> None:
+    connector = sa_factory(
         timeout_seconds=0.1,
         max_attempts=5,
     )
@@ -271,19 +259,10 @@ async def long_poll(q: TaskQueue) -> int:
 @pytest.mark.asyncio()
 @pytest.mark.benchmark()
 @pytest.mark.require_db()
-async def test_benchmark(engine: AsyncEngine) -> None:
-    connector = SqlAlchemyConnector(
-        engine=engine,
-        table=task_table,
-        id_column=task_table.c.id,
-        priority_column=task_table.c.time_created,
-        locked_by_name_column=task_table.c.locked_by_name,
-        locked_by_time_column=task_table.c.locked_by_time,
-        serializer=Task.db_serialize,
-        deserializer=Task.db_deserialize,
-        init_states=["enqueued"],
-        state_column=task_table.c.state,
-        attempts_column=task_table.c.attempts,
+async def test_benchmark(
+    engine: AsyncEngine, sa_factory: SaFactoryType
+) -> None:
+    connector = sa_factory(
         max_attempts=3,
         timeout_seconds=10.0,
     )
@@ -311,48 +290,3 @@ async def test_benchmark(engine: AsyncEngine) -> None:
 
     print(f"Time {total_time:.1f}, {processed_tasks=}, {tps=}")
     assert False
-
-
-# @pytest.mark.fast()
-# @pytest.mark.asyncio()
-# @pytest.mark.require_db()
-# async def test_interface(engine: AsyncEngine) -> None:
-#     connector = SqlAlchemyConnector(
-#         engine=engine,
-#         table=task_table,
-#         id_logic=TaskIdLogic(task_table.c.id),
-#         # priority_logic=TaskPriorityLogic(task_table.c.time_created),
-#         # lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
-#         # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
-#         # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
-#         # states=TaskStates(task_table.c.state, init=["enqueued"]),
-#         id_column=task_table.c.id,
-#         priority_column=task_table.c.time_created,
-#         locked_by_name_column=task_table.c.locked_by_name,
-#         locked_by_time_column=task_table.c.locked_by_time,
-#         serializer=Task.db_serialize,
-#         deserializer=Task.db_deserialize,
-#         init_states=["enqueued"],
-#         state_column=task_table.c.state,
-#         attempts_column=task_table.c.attempts,
-#         max_attempts=3,
-#         timeout_seconds=10.0,
-#     )
-#     q = TaskQueue(connector=connector)
-#     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
-#     await q.put(task)
-
-#     read_msg = await q.pull({"state": "processing"})
-#     assert read_msg
-
-#     assert read_msg.parse_id == str(task.parse_id)
-
-#     await asyncio.sleep(0.5)
-
-#     read_msg_2 = await q.pull({"state": "processing"})
-#     assert read_msg_2
-
-#     await asyncio.sleep(0.5)
-
-#     read_msg_3 = await q.pull({"state": "processing"})
-#     assert read_msg_3

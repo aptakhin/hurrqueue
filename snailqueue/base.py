@@ -22,7 +22,7 @@ class Connector(Protocol):
     async def patch_task(
         self,
         task_id: IdType,
-        state: Optional[str] = None,
+        values: dict[str, str],
     ) -> TaskType: ...
 
 
