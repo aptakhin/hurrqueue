@@ -22,25 +22,17 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from statemachine import State, StateMachine
 
 from snailqueue import Queue
-from snailqueue.connectors.sa import SqlAlchemyConnector, TaskIdLogic
+from snailqueue.connectors.sa import (
+    SqlAlchemyConnector,
+    TaskAttemptsLogic,
+    TaskCodec,
+    TaskIdLogic,
+    TaskLockByTimeLogic,
+    TaskPriorityLogic,
+    TaskStates,
+)
 
 meta = MetaData()
-
-
-@dataclass
-class Message(object):
-    message_id: Optional["uuid.UUID"] = None
-
-    def db_serialize(self: "Message") -> dict[str, str]:  # noqa: PLR6301
-        return {}
-
-    @staticmethod
-    def db_deserialize(row: dict[str, str]) -> "Message":
-        return Message(message_id=row["id"])
-
-
-class MessageQueue(Queue[str, Message]):
-    pass
 
 
 @pytest.fixture()
@@ -69,26 +61,23 @@ SaFactoryType = Callable[[...], SqlAlchemyConnector]
 
 @pytest.fixture()
 async def sa_factory(engine: AsyncEngine) -> SaFactoryType:
-    def factory(**overrides) -> SqlAlchemyConnector:
-        kwargs = dict(
-            engine=engine,
-            table=task_table,
-            id_logic=TaskIdLogic(task_table.c.id),
-            # priority_logic=TaskPriorityLogic(task_table.c.time_created),
-            #         # lock_logic=TaskLockByTimeLogic(task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=0.1),
-            #         # attempts_logic=TaskAttemptsLogic(task_table.c.attempts, max_attempts=5),
-            #         # codec=TaskCodec(Task.db_serialize, Task.db_deserialize),
-            #         # states=TaskStates(task_table.c.state, init=["enqueued"]),
-            priority_column=task_table.c.time_created,
-            locked_by_name_column=task_table.c.locked_by_name,
-            locked_by_time_column=task_table.c.locked_by_time,
-            serializer=Task.db_serialize,
-            deserializer=Task.db_deserialize,
-            init_states=["enqueued"],
-            state_column=task_table.c.state,
-            attempts_column=task_table.c.attempts,
-            timeout_seconds=60,
-        )
+    def factory(**overrides) -> SqlAlchemyConnector:  # noqa: ANN003
+        kwargs = {
+            "engine": engine,
+            "table": task_table,
+            "id_logic": TaskIdLogic(task_table.c.id),
+            "priority_logic": TaskPriorityLogic(task_table.c.time_created),
+            "lock_logic": TaskLockByTimeLogic(
+                task_table.c.locked_by_time,
+                name_column=task_table.c.locked_by_name,
+                seconds=60.0,
+            ),
+            "attempts_logic": TaskAttemptsLogic(
+                task_table.c.attempts, max_attempts=1
+            ),
+            "codec": TaskCodec(Task.db_serialize, Task.db_deserialize),
+            "states": TaskStates(task_table.c.state, init_states=["enqueued"]),
+        }
         kwargs.update(overrides)
         return SqlAlchemyConnector(**kwargs)
 
@@ -197,8 +186,20 @@ async def test_state(engine: AsyncEngine, sa_factory: SaFactoryType) -> None:
 @pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
-async def test_retries(engine: AsyncEngine, sa_factory) -> None:
-    connector = sa_factory(timeout_seconds=None, max_attempts=5)
+async def test_retries(
+    engine: AsyncEngine,
+    sa_factory: SaFactoryType,
+) -> None:
+    connector = sa_factory(
+        lock_logic=TaskLockByTimeLogic(
+            task_table.c.locked_by_time,
+            name_column=task_table.c.locked_by_name,
+            seconds=None,
+        ),
+        attempts_logic=TaskAttemptsLogic(
+            task_table.c.attempts, max_attempts=2
+        ),
+    )
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     await q.put(task)
@@ -212,18 +213,25 @@ async def test_retries(engine: AsyncEngine, sa_factory) -> None:
     assert read_msg_2
 
     read_msg_3 = await q.pull({"state": "processing"})
-    assert read_msg_3
+    # Our of retries
+    assert read_msg_3 is None
 
 
 @pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_retries_sleep(
-    engine: AsyncEngine, sa_factory: SaFactoryType
+    sa_factory: SaFactoryType,
 ) -> None:
     connector = sa_factory(
-        timeout_seconds=0.1,
-        max_attempts=5,
+        lock_logic=TaskLockByTimeLogic(
+            task_table.c.locked_by_time,
+            name_column=task_table.c.locked_by_name,
+            seconds=0.1,
+        ),
+        attempts_logic=TaskAttemptsLogic(
+            task_table.c.attempts, max_attempts=3
+        ),
     )
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
@@ -260,11 +268,17 @@ async def long_poll(q: TaskQueue) -> int:
 @pytest.mark.benchmark()
 @pytest.mark.require_db()
 async def test_benchmark(
-    engine: AsyncEngine, sa_factory: SaFactoryType
+    sa_factory: SaFactoryType,
 ) -> None:
     connector = sa_factory(
-        max_attempts=3,
-        timeout_seconds=10.0,
+        attempts_logic=TaskAttemptsLogic(
+            task_table.c.attempts, max_attempts=3
+        ),
+        lock_logic=TaskLockByTimeLogic(
+            task_table.c.locked_by_time,
+            name_column=task_table.c.locked_by_name,
+            seconds=10.0,
+        ),
     )
     q = TaskQueue(connector=connector)
     for _ in range(500):

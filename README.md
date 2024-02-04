@@ -1,14 +1,14 @@
-snailqueue - is a database (PostgreSQL) asyncio task queue in Python.
+snailqueue - is a database (PostgreSQL) asyncio task queue in Python. Toolkit for asynchronous executions.
 
 Context of appropriate using of this library:
 
 * Not a heavy loads, less than 10 RPS.
 * Limited amounts of queues, as implementation relies on tables.
 * Not a big tasks context.
-
+* Without dependencies or with minimal amount of them. If you need dependencies my advice to look into the Workflow solutions or [Temporal.io](https://temporal.io/)
 
 * Tasks are stateful.
-* Flexible to any tasks storages: dict, pydantic BaseModel, dataclass, attrs and any generic.
+* Flexible to any tasks storages: dict, pydantic BaseModel, dataclass, attrs or any generic.
 
 ```bash
 pip install snailqueue
