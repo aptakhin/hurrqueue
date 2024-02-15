@@ -24,20 +24,20 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import insert
 
 if TYPE_CHECKING:
-    from sqlalchemy import Column, Table
+    from sqlalchemy import Column, ColumnElement, Table
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
     from sqlalchemy.sql.dml import DMLWhereBase
 
 from snailqueue.base import (
     Connector,
     IdType,
-    StateType,
     TaskNotFoundError,
     TaskType,
 )
 
-SerializerCallable = Callable[[TaskType], dict[str, Any]]
-DeserializerCallable = Callable[[dict[str, Any]], IdType]
+DictValues = dict[str, Union[str, TextClause]]
+SerializerCallable = Callable[[TaskType], DictValues]
+DeserializerCallable = Callable[[DictValues], IdType]
 
 
 def _execute_chain(chain: list) -> Any:
@@ -88,7 +88,7 @@ class SqlAlchemyConnector(Connector):
 
     async def pull(
         self,
-        patch_values: dict[str, str],
+        patch_values: DictValues,
         locked_by: Optional[str] = None,
         timeout_seconds: Optional[float] = None,
     ) -> Optional[TaskType]:
@@ -117,18 +117,18 @@ class SqlAlchemyConnector(Connector):
             ]
             select_q = _execute_chain(select_chain)
 
-            values: dict[str, Union[str, TextClause]] = {}
+            values: DictValues = {}
 
             if attempts_values := self._attempts_logic.get_attempts_values():
                 values.update(attempts_values)
 
             if locked_by_values := self._lock_logic.get_locked_by_values(
-                locked_by
+                locked_by,
             ):
                 values.update(locked_by_values)
 
             if timeout_values := self._lock_logic.get_timeout_values(
-                timeout_seconds
+                timeout_seconds,
             ):
                 values.update(timeout_values)
 
@@ -167,7 +167,7 @@ class SqlAlchemyConnector(Connector):
     async def patch_task(
         self,
         task_id: IdType,
-        values: dict[str, str],
+        values: DictValues,
     ) -> TaskType:
         async with self._begin() as conn:
             chain = [
@@ -204,8 +204,9 @@ class SqlAlchemyConnector(Connector):
 class TaskIdLogic:
     def __init__(self, id_columns: Union["Column", list["Column"]]) -> None:
         if isinstance(id_columns, list) and len(id_columns) > 1:
+            msg = "More than one column in id is not supported yet!"
             raise ValueError(
-                "More than one column in id is not supported yet!",
+                msg,
             )
 
         if isinstance(id_columns, list):
@@ -224,11 +225,12 @@ class TaskIdLogic:
 
 class TaskPriorityLogic:
     def __init__(
-        self, priority_columns: Union["Column", list["Column"]]
+        self,
+        priority_columns: Union["Column", list["Column"]],
     ) -> None:
         if isinstance(priority_columns, list) and len(priority_columns) > 1:
             raise ValueError(
-                "More than one column in priority is not supported yet!",
+                "More than one priority column is not supported yet!",
             )
 
         if isinstance(priority_columns, list):
@@ -257,27 +259,26 @@ class TaskLockByTimeLogic:
         self.name_column = name_column
         self.seconds = seconds
         self.name = name
-        # task_table.c.locked_by_time, name_column=task_table.c.locked_by_name, seconds=60.)
 
-    def inject_where_unlocked(self) -> "DMLWhereBase":
+    def inject_where_unlocked(self) -> "ColumnElement[bool]":
         return self.time_column.is_(None)
 
-    def inject_where_was_locked(self) -> "DMLWhereBase":
+    def inject_where_was_locked(self) -> "ColumnElement[bool]":
         return and_(
             self.time_column.isnot(None),
             func.now() >= self.time_column,
         )
 
-    def get_locked_by_values(self, name: Optional[str]):
-        if self.name_column is None:
+    def get_locked_by_values(self, name: Optional[str]) -> DictValues:
+        name = self.name or name
+        if self.name_column is None or name is None:
             return {}
 
-        name = self.name or name
         return {
             self.name_column.name: name,
         }
 
-    def get_timeout_values(self, seconds: Optional[float]):
+    def get_timeout_values(self, seconds: Optional[float]) -> DictValues:
         timeout_seconds = self.seconds or seconds
         if timeout_seconds is None:
             return {}
@@ -290,31 +291,37 @@ class TaskLockByTimeLogic:
 
 
 class TaskAttemptsLogic:
-    def __init__(self, attempts_column: "Column", max_attempts: int = 1):
+    def __init__(
+        self, attempts_column: "Column", max_attempts: int = 1
+    ) -> None:
         self.attempts_column = attempts_column
         self.max_attempts = max_attempts
 
-    def inject_condition(self):
+    def inject_condition(self) -> "ColumnElement[bool]":
         return self.attempts_column < self.max_attempts
 
-    def get_attempts_values(self) -> dict[str, Union[TextClause, str]]:
+    def get_attempts_values(self) -> DictValues:
         return {
             self.attempts_column.name: text(
-                f"{self.attempts_column.name} + 1"
+                f"{self.attempts_column.name} + 1",
             ),
         }
 
 
-class TaskCodec(Generic[TaskType]):
-    def __init__(self, serializer, deserializer) -> None:
+class TaskCodec(Generic[IdType, TaskType]):
+    def __init__(
+        self,
+        serializer: SerializerCallable,
+        deserializer: DeserializerCallable,
+    ) -> None:
         self.serializer = serializer
         self.deserializer = deserializer
 
-    def serialize(self, d) -> None:
-        return self.serializer(d)
+    def serialize(self, task: TaskType) -> DictValues:
+        return self.serializer(task)
 
-    def deserialize(self, d) -> None:
-        return self.deserializer(d)
+    def deserialize(self, values: DictValues) -> IdType:
+        return self.deserializer(values)
 
 
 class TaskStates:
@@ -322,8 +329,8 @@ class TaskStates:
         self.state_column = state_column
         self.init_states = init_states
 
-    def inject_where_init_states(self):
+    def inject_where_init_states(self) -> "ColumnElement[bool]":
         return self.state_column.in_(self.init_states)
 
-    def inject_where_not_init_states(self):
+    def inject_where_not_init_states(self) -> "ColumnElement[bool]":
         return self.state_column.notin_(self.init_states)

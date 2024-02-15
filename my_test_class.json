@@ -1,0 +1,13 @@
+{
+  "properties": {
+    "p": {
+      "title": "P",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "p"
+  ],
+  "title": "MyClass",
+  "type": "object"
+}

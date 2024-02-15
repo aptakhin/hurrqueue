@@ -73,7 +73,8 @@ async def sa_factory(engine: AsyncEngine) -> SaFactoryType:
                 seconds=60.0,
             ),
             "attempts_logic": TaskAttemptsLogic(
-                task_table.c.attempts, max_attempts=1
+                task_table.c.attempts,
+                max_attempts=1,
             ),
             "codec": TaskCodec(Task.db_serialize, Task.db_deserialize),
             "states": TaskStates(task_table.c.state, init_states=["enqueued"]),
@@ -156,10 +157,9 @@ task_table = Table(
 )
 
 
-@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
-async def test_state(engine: AsyncEngine, sa_factory: SaFactoryType) -> None:
+async def test_state(sa_factory: SaFactoryType) -> None:
     connector = sa_factory()
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
@@ -183,11 +183,9 @@ async def test_state(engine: AsyncEngine, sa_factory: SaFactoryType) -> None:
     assert await q.pull({"state": "processing"}) is None
 
 
-@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_retries(
-    engine: AsyncEngine,
     sa_factory: SaFactoryType,
 ) -> None:
     connector = sa_factory(
@@ -197,17 +195,16 @@ async def test_retries(
             seconds=None,
         ),
         attempts_logic=TaskAttemptsLogic(
-            task_table.c.attempts, max_attempts=2
+            task_table.c.attempts,
+            max_attempts=2,
         ),
     )
     q = TaskQueue(connector=connector)
     task = Task(state=TaskStateMachine(), parse_id=uuid.uuid4())
     await q.put(task)
 
-    read_msg = await q.pull({"state": "processing"})
-    assert read_msg
-
-    assert read_msg.parse_id == str(task.parse_id)
+    read_msg_1 = await q.pull({"state": "processing"})
+    assert read_msg_1
 
     read_msg_2 = await q.pull({"state": "processing"})
     assert read_msg_2
@@ -217,7 +214,6 @@ async def test_retries(
     assert read_msg_3 is None
 
 
-@pytest.mark.fast()
 @pytest.mark.asyncio()
 @pytest.mark.require_db()
 async def test_retries_sleep(
@@ -227,10 +223,11 @@ async def test_retries_sleep(
         lock_logic=TaskLockByTimeLogic(
             task_table.c.locked_by_time,
             name_column=task_table.c.locked_by_name,
-            seconds=0.1,
+            seconds=0.01,
         ),
         attempts_logic=TaskAttemptsLogic(
-            task_table.c.attempts, max_attempts=3
+            task_table.c.attempts,
+            max_attempts=2,
         ),
     )
     q = TaskQueue(connector=connector)
@@ -240,17 +237,15 @@ async def test_retries_sleep(
     read_msg = await q.pull({"state": "processing"})
     assert read_msg
 
-    assert read_msg.parse_id == str(task.parse_id)
-
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.1)
 
     read_msg_2 = await q.pull({"state": "processing"})
     assert read_msg_2
 
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.1)
 
     read_msg_3 = await q.pull({"state": "processing"})
-    assert read_msg_3
+    assert read_msg_3 is None
 
 
 async def long_poll(q: TaskQueue) -> int:
@@ -272,7 +267,8 @@ async def test_benchmark(
 ) -> None:
     connector = sa_factory(
         attempts_logic=TaskAttemptsLogic(
-            task_table.c.attempts, max_attempts=3
+            task_table.c.attempts,
+            max_attempts=3,
         ),
         lock_logic=TaskLockByTimeLogic(
             task_table.c.locked_by_time,

@@ -8,6 +8,7 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.13"
+pydantic = "^2.6.1"
 
 [tool.poetry.group.dev.dependencies]
 ruff = "^0.2.0"
@@ -31,33 +32,6 @@ build-backend = "poetry.core.masonry.api"
 
 
 [tool.ruff]
-# Exclude a variety of commonly ignored directories.
-exclude = [
-    ".direnv",
-    ".eggs",
-    ".git",
-    ".git-rewrite",
-    ".ipynb_checkpoints",
-    ".mypy_cache",
-    ".nox",
-    ".pants.d",
-    ".pyenv",
-    ".pytest_cache",
-    ".pytype",
-    ".ruff_cache",
-    ".svn",
-    ".tox",
-    ".venv",
-    ".vscode",
-    "__pypackages__",
-    "_build",
-    "buck-out",
-    "build",
-    "dist",
-    "node_modules",
-    "site-packages",
-    "venv",
-]
 
 line-length = 79
 indent-width = 4
@@ -162,7 +136,7 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 markers = [
-    "fast: tests for TDD and pre-commit development",
+    "slow: slow tests not for TDD",
     "require_db: marks tests as require database",
     "benchmark: marks benchmark tests"
 ]
